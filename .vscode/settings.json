@@ -1,0 +1,25 @@
+{
+    "files.associations": {
+        "qnetworkaccessmanager": "cpp",
+        "qjsondocument": "cpp",
+        "array": "cpp",
+        "*.tcc": "cpp",
+        "istream": "cpp",
+        "ranges": "cpp",
+        "tuple": "cpp",
+        "utility": "cpp",
+        "variant": "cpp",
+        "qmediaplayer": "cpp",
+        "qmediaplaylist": "cpp",
+        "qwebengineprofile": "cpp",
+        "qvideowidget": "cpp",
+        "chrono": "cpp",
+        "deque": "cpp",
+        "list": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "string_view": "cpp",
+        "algorithm": "cpp"
+    }
+}
