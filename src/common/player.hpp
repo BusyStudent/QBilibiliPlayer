@@ -1,12 +1,12 @@
 #pragma once
 
+#include <QtMultimediaWidgets/QGraphicsVideoItem>
 #include <QtMultimedia/QMediaPlayer>
 #include <QtMultimedia/QMediaPlaylist>
-#include <QtMultimediaWidgets/QVideoWidget>
 
-#include <QLinkedList>
-#include <QLabel>
-#include <QTimer>
+#include <QGraphicsTextItem>
+#include <QGraphicsScene>
+#include <QGraphicsView>
 
 #include "defs.hpp"
 
@@ -26,31 +26,44 @@ class Danmaku {
             Code = 8,
             Bas = 9,
         }type;
+        
         enum Pool {
             RegularPool = 1,
             SubtitlePool = 2,
             SpecialPool = 3,
         }pool;
+        
+        enum Size {
+            Small = 18,
+            Medium = 25,
+            Large = 32,
+        }size;
+
         QColor color;
         QString text;
         qreal position;//< Which second the danmaku appears
-        uint32_t size;//< Size in px
         uint32_t level;//< Level from 1 to 10
-
 
         bool isRegular() const {
             return type == Regular1 || type == Regular2 || type == Regular3;
         }
-};
-class PlayingDanmaku {
-    public:
-        qreal x,y;// from 0 to 1
-        qreal xadv;//< Advance normalized
-        qreal disappear_time;//< Disappear time
-        const Danmaku *danmaku;
+        bool isReserve() const {
+            return type == Reserve;
+        }
+        bool isMoveable() const{
+            return isRegular() || type == Reserve;
+        }
 };
 
-class Player : public QVideoWidget {
+class DanmakuItem : public QGraphicsTextItem {
+    public:
+        using QGraphicsTextItem::QGraphicsTextItem;
+
+        const Danmaku *info;
+        qreal deadtime;
+};
+
+class Player : public QGraphicsView {
     Q_OBJECT
 
     signals:
@@ -72,11 +85,21 @@ class Player : public QVideoWidget {
         void stop();
     private slots:
         void forwardError(QMediaPlayer::Error error);
-        void positionChanged(qint64 position);
         // void paused();
         // void stopped();
     private:
         void durationChanged(qint64 duration);
+        void positionChanged(qint64 position);
+        void stateChanged(QMediaPlayer::State);
+
+        //Event
+        void resizeEvent(QResizeEvent *event) override;
+        void timerEvent(QTimerEvent *event) override;
+        void keyPressEvent(QKeyEvent *event) override;
+
+        //Player set size
+        void nativeSizeChanged(const QSizeF &size);
+        void fit();
 
         //Danmaku
         void danmakuSeek(qint64 position);
@@ -84,24 +107,31 @@ class Player : public QVideoWidget {
         void danmakuPause();
         void danmakuClear();
 
-        void doUpdate(){
+        //Screen size
+        QSizeF native_size = QSizeF(-1,-1);
 
-        }
+        QGraphicsScene scene;
+        QGraphicsVideoItem *vitem;
+        QGraphicsItemGroup *danmaku_group;//< Danmaku group alwasy is screen size
+        QGraphicsItemGroup *control_group;//< Control group alwasy is screen size
 
-        QLinkedList<PlayingDanmaku> playing_danmaku_list;//< Danmaku list that is being displayed
         QList<Danmaku>::const_iterator danmaku_iter;//< Current position of danmaku
         QList<Danmaku> danmaku_list;
 
         QMediaPlayer player;
-        QTimer timer;
 
-        int alive_time = 5;// Single danmaku alive time
+        int danmaku_timer = 0;
+
+        int alive_time = 7;// Single danmaku alive time
         qint64 video_duration = -1;
 
-        qreal last_added;//< Last position danmaku update
-        qint64 update_ticks = 30;
+        qreal danmaku_prev_time;//< Last position danmaku update
+        qint64 danmaku_fps = 60;//< TODO : Detect FPS
         bool danmaku_started = false;
         bool danmaku_paused = false;
+
+        //Outline
+        QPen outpen = QPen(Qt::black,0.5,Qt::SolidLine);
 };
 
 PLAYER_NS_END

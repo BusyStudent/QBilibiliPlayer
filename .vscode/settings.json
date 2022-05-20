@@ -20,6 +20,16 @@
         "unordered_map": "cpp",
         "vector": "cpp",
         "string_view": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "qgraphicsvideoitem": "cpp",
+        "qdomdocument": "cpp",
+        "qabstractvideosurface": "cpp",
+        "qgraphicsscene": "cpp",
+        "initializer_list": "cpp",
+        "qlinkedlist": "cpp",
+        "qgraphicstextitem": "cpp",
+        "qtextcharformat": "cpp",
+        "qtimerevent": "cpp",
+        "qtextcursor": "cpp"
     }
 }
