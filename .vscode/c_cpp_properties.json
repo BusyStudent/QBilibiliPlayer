@@ -11,7 +11,8 @@
                 "/usr/include/x86_64-linux-gnu/qt5/QtNetwork",
                 "/usr/include/x86_64-linux-gnu/qt5/QtGui",
                 "/usr/include/x86_64-linux-gnu/qt5/QtXml",
-                "/usr/include/x86_64-linux-gnu/qt5/QtXmlPatterns"
+                "/usr/include/x86_64-linux-gnu/qt5/QtXmlPatterns",
+                "/usr/include/libxml2"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang",

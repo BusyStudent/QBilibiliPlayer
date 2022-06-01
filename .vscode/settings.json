@@ -30,6 +30,11 @@
         "qgraphicstextitem": "cpp",
         "qtextcharformat": "cpp",
         "qtimerevent": "cpp",
-        "qtextcursor": "cpp"
+        "qtextcursor": "cpp",
+        "qmediacontent": "cpp",
+        "qnetworkreply": "cpp",
+        "qxmlquery": "cpp",
+        "qxmlstreamreader": "cpp",
+        "qwebenginepage": "cpp"
     }
 }

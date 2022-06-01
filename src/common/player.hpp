@@ -9,6 +9,11 @@
 #include <QGraphicsView>
 
 #include "defs.hpp"
+#include "app.hpp"
+
+//We cached 2 resource at once time
+#define PLAYER_CACHES_SIZE 2
+
 
 
 PLAYER_NS_BEGIN
@@ -63,6 +68,79 @@ class DanmakuItem : public QGraphicsTextItem {
         qreal deadtime;
 };
 
+/**
+ * @brief The Interface to play a list of resource like one single resource
+ * 
+ */
+class MediaPlayer : public QObject {
+    Q_OBJECT
+
+    signals:
+        void error(QMediaPlayer::Error error);
+        void durationChanged(qint64 duration);
+        void positionChanged(qint64 position);
+        void stateChanged(QMediaPlayer::State state);
+    private slots:
+        //Map cached resource to the player
+        void _playerDurationChanged(qint64 duration);
+        void _playerPositionChanged(qint64 position);
+        void _playerStateChanged(QMediaPlayer::State state);
+        void _playerError(QMediaPlayer::Error error);
+        void _playerMediaStatusChanged(QMediaPlayer::MediaStatus status);
+        void _playerBufferStatusChanged(int percent);
+    private:
+        QMediaPlayer *_currentPlayer(){
+            return currentPlayer;
+        }
+        QMediaPlayer *_nextPlayer(){
+            if(&player1 == _currentPlayer())
+                return &player2;
+            else
+                return &player1;
+        }
+        void _setCurrentPlayer(QMediaPlayer *player);
+        const char *_currentPlayerName(){
+            if(&player1 == _currentPlayer())
+                return "player1";
+            else
+                return "player2";
+        }
+        const char *_nextPlayerName(){
+            if(&player1 == _currentPlayer())
+                return "player2";
+            else
+                return "player1";
+        }
+        const char *_nameOfPlayer(QObject *player){
+            if(&player1 == player)
+                return "player1";
+            else
+                return "player2";
+        }
+    public:
+        MediaPlayer(QObject *parent = nullptr);
+        ~MediaPlayer();
+
+        void setVideoOutput(QGraphicsVideoItem *item);
+        void setVideoOutput(QGraphicsView *view);
+        void setMedia(VideoResource *res);
+
+        void pause();
+        void play();
+        qint64 position() const;
+    private:
+        //Switch between 2 players
+        QMediaPlayer player1;
+        QMediaPlayer player2;
+
+        QMediaPlayer *currentPlayer = &player1;
+
+        VideoResource *resource;
+        QGraphicsVideoItem *video_item;
+        QGraphicsVideoItem  empty_item;
+        size_t cur_segment = 0;
+};
+
 class Player : public QGraphicsView {
     Q_OBJECT
 
@@ -76,10 +154,8 @@ class Player : public QGraphicsView {
         /**
          * @brief Play the video
          * 
-         * @param video 
-         * @param audio 
          */
-        void play(const QMediaContent &video,const QMediaContent &audio);
+        void play(const VideoResource &res);
         void pause();
         void resume();
         void stop();
@@ -118,7 +194,12 @@ class Player : public QGraphicsView {
         QList<Danmaku>::const_iterator danmaku_iter;//< Current position of danmaku
         QList<Danmaku> danmaku_list;
 
-        QMediaPlayer player;
+        //Resource
+        VideoResource video_res;
+        
+        bool video_ready = false;
+
+        MediaPlayer player;
 
         int danmaku_timer = 0;
 

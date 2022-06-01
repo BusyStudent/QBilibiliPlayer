@@ -1,11 +1,13 @@
+#include "common/providers.hpp"
 #include "common/player.hpp"
 #include "common/app.hpp"
 
+#include <QDesktopServices>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QFontDialog>
 #include <QMessageBox>
-#include <QFileDialog>
 #include <QKeyEvent>
 #include <QMenuBar>
 
@@ -43,7 +45,16 @@ App::App(QWidget *p):QMainWindow(p){
     });
 
     QMenu *config_menu = menu_bar->addMenu("设置");
-
+    QAction *report_menu = config_menu->addAction("报告问题");
+    connect(report_menu,&QAction::triggered,[this](){
+        //Open URL
+        auto url = QUrl("https://github.com/BusyStudent/QBilibiliPlayer/issues/new");
+        auto ret = QDesktopServices::openUrl(url);
+        if(!ret){
+            //Let user open it by himself
+            QMessageBox::information(this,"打开失败","请手动打开链接：" + url.toString());
+        }
+    });
     QAction *about_action = config_menu->addAction("关于");
     connect(about_action,&QAction::triggered,[this](){
         QMessageBox::about(nullptr,"关于",R"(QBilibili Player author: BusyStduent)");
@@ -177,6 +188,8 @@ void App::fetchEpisodeInfo(const QUrl &url){
 QList<VideoProvider*> App::createProviderList(){
     QList<VideoProvider*> providers;
     providers.push_back(new BilibiliProvider(&manager));
+    providers.push_back(new AngelProvider(&manager));
+    providers.push_back(new YsjdmProvider(&manager));
     providers.push_back(new LocalProvider(&manager));
     return providers;
 }
@@ -218,6 +231,19 @@ VideoBroswer::VideoBroswer(App *w,const SeasonInfo &info):QMainWindow(w),season(
     //status bar
     status_bar = new QStatusBar(this);
     setStatusBar(status_bar);
+    //menubar
+    menu_bar = new QMenuBar(this);
+    setMenuBar(menu_bar);
+
+    QMenu *config_menu = menu_bar->addMenu("设置");
+    QAction *font_config_action = config_menu->addAction("弹幕字体设置");
+    connect(font_config_action,&QAction::triggered,[this](){
+        QFontDialog dialog;
+        dialog.setWindowTitle("选择一个用于弹幕的字体");
+        dialog.exec();
+        QFont font = dialog.selectedFont();
+        video_widget->setFont(font);
+    });
     //--Layout done
 
     // BilibiliProvider provider;
@@ -273,9 +299,9 @@ void VideoBroswer::listItemClicked(QListWidgetItem *item){
     // BilibiliProvider provider;
     provider->fetchVideo(season,index,ui->resolutionBox->currentData().toString());
 }
-void VideoBroswer::videoReady(const QMediaContent &videos,const QMediaContent &audios){
+void VideoBroswer::videoReady(const VideoResource &res){
     qDebug() << "Video Ready";
-    video_widget->play(videos,audios);
+    video_widget->play(res);
     status_bar->showMessage("VideoReady playing...");
     //Begin fetch danmaku
     fetchDanmaku(ui->listWidget->currentItem()->data(Qt::UserRole).toInt());
@@ -312,25 +338,45 @@ void VideoBroswer::fetchDanmaku(int n){
     qDebug() << "Fetch Danmaku for video:" << n;
     int cid = season.episodes[n].cid;
     //Get danmaku from bilibili
-    QUrl req(QString("http://comment.bilibili.com/%1.xml").arg(cid));
+    QUrl req(QString("https://comment.bilibili.com/%1.xml").arg(cid));
     QNetworkRequest request(req);
     request.setRawHeader("User-Agent",PLAYER_USERAGENT);
     request.setRawHeader("Referer",PLAYER_BILIREFERER);
     auto reply = manager->get(request);
 
     //Connect
-    connect(reply,&QNetworkReply::finished,[this,reply](){
-        if(reply->error()){
-            qDebug() << "Fetch Danmaku Error:" << reply->errorString();
-            status_bar->showMessage("Fetch Danmaku Error:" + reply->errorString());
-            return;
-        }
-        qDebug() << "Fetch Danmaku Success";
-        status_bar->showMessage("Fetch Danmaku Success");
-        QString ret = reply->readAll();
-        //Process it
-        playDanmaku(ret);
+    connect(reply,&QNetworkReply::finished,[reply,this](){
+        danmakuReceived(reply);
     });
+    qDebug() << req;
+}
+void VideoBroswer::danmakuReceived(QNetworkReply *reply){
+    reply->deleteLater();        
+    if(reply->error()){
+        qDebug() << "Fetch Danmaku Error:" << reply->errorString();
+        status_bar->showMessage("Fetch Danmaku Error:" + reply->errorString());
+        return;
+    }
+    if(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 302){
+        //Redirect
+        qDebug() << "Redirect";
+        QUrl redirect = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
+        QNetworkRequest request(redirect);
+        request.setRawHeader("User-Agent",PLAYER_USERAGENT);
+        request.setRawHeader("Referer",PLAYER_BILIREFERER);
+        auto reply = manager->get(request);
+        qDebug() << redirect;
+        connect(reply,&QNetworkReply::finished,this,[reply,this](){
+            danmakuReceived(reply);
+        });
+        return;
+    }
+
+    qDebug() << "Fetch Danmaku Success";
+    status_bar->showMessage("Fetch Danmaku Success");
+    QString ret = reply->readAll();
+    //Process it
+    playDanmaku(ret);
 }
 void VideoBroswer::playDanmaku(const QString &d){
     video_widget->setDanmaku(d);
@@ -356,158 +402,8 @@ void VideoBroswer::keyPressEvent(QKeyEvent *event){
         ui->resolutionBox->setVisible(visible);
         ui->resolutionLabel->setVisible(visible);
         status_bar->setVisible(visible);
+        menu_bar->setVisible(visible);
     }
-}
-
-//--Video Provider
-void BilibiliProvider::fetchVideo(const SeasonInfo &info,int n,QStringView resolution){
-    const auto &episode = info.episodes[n];
-
-    if(episode.need_pay){        
-        emit error("Cherry这集让你付钱,当前Provider不支持这个操作");
-        return;
-    }
-
-    //Get video url from bilibili
-    QUrl url("https://api.bilibili.com/x/player/playurl?avid=" + QString::number(episode.aid) 
-        + "&cid=" + QString::number(episode.cid) 
-        + "&qn=" + resolution.toString() 
-    );
-
-    QNetworkRequest request;
-    request.setUrl(url);
-    request.setRawHeader("User-Agent",PLAYER_USERAGENT);
-    request.setRawHeader("Referer",PLAYER_BILIREFERER);
-
-    //Send it
-    auto reply = manager->get(request);
-
-    connect(reply,&QNetworkReply::finished,[this,reply](){
-        //Check the reply
-        reply->deleteLater();
-        if(reply->error()){
-            qDebug() << "Error:" << reply->errorString();
-            emit error(reply->errorString());
-            return;
-        }
-        //Parse json 
-        QJsonDocument json_doc = QJsonDocument::fromJson(reply->readAll());
-        if(json_doc.isNull()){
-            qDebug() << "Error: Invalid JSON";
-            emit error("Invalid JSON");
-            return;
-        }
-        if(json_doc["code"].toInt() != 0){
-            qDebug() << "Error:" << json_doc["message"].toString();
-            emit error(json_doc["message"].toString());
-            return;
-        }
-        //Get the video url
-        QJsonValue data = json_doc["data"];
-        if(data.isNull()){
-            qDebug() << "Error: Invalid JSON";
-            emit error("Invalid JSON");
-            return;
-        }
-        QJsonArray durl = data["durl"].toArray();
-        qDebug() << durl;
-
-        QMediaPlaylist *video_list = new QMediaPlaylist;
-        QMediaPlaylist *audio_list = new QMediaPlaylist;
-
-        for(auto item : durl){
-            auto u = item.toObject()["url"].toString();
-            //Pack to QMediaContent
-            QNetworkRequest request2;
-            request2.setUrl(u);
-            request2.setRawHeader("User-Agent",PLAYER_USERAGENT);
-            request2.setRawHeader("Referer",PLAYER_BILIREFERER);
-
-            video_list->addMedia(QMediaContent(request2));
-        }
-        //Pack info single content
-        QMediaContent videos(video_list,QUrl(),true);
-        QMediaContent audios(audio_list,QUrl(),true);
-
-        emit videoReady(videos,audios);
-    });
-}
-void BilibiliProvider::fetchInfo(const SeasonInfo &info,int n){
-    const auto &episode = info.episodes[n];
-
-    if(episode.need_pay){        
-        emit error("Cherry这集让你付钱,当前Provider不支持这个操作");
-        return;
-    }
-
-    //Get video url from bilibili
-    QUrl url("https://api.bilibili.com/x/player/playurl?avid=" + QString::number(episode.aid) + "&cid=" + QString::number(episode.cid));
-    QNetworkRequest request;
-    request.setUrl(url);
-    request.setRawHeader("User-Agent",PLAYER_USERAGENT);
-    request.setRawHeader("Referer",PLAYER_BILIREFERER);
-
-    //Send it
-    auto reply = manager->get(request);
-    
-    connect(reply,&QNetworkReply::finished,[reply,this](){
-        reply->deleteLater();
-        if(reply->error()){
-            emit error(reply->errorString());
-            return;
-        }
-        //Parse json
-        QJsonDocument json_doc = QJsonDocument::fromJson(reply->readAll());
-        if(json_doc.isNull()){
-            emit error("Invalid JSON");
-            return;
-        }
-        if(json_doc["code"].toInt() != 0){
-            emit error(json_doc["message"].toString());
-            return;
-        }
-        //Get the video resolution
-        QJsonValue data = json_doc["data"];
-        QJsonArray arr  = data["accept_quality"].toArray();
-        VideoInfo info;
-
-        qDebug() << data["accept_quality"].toArray();
-
-        for(auto item : data["accept_quality"].toArray()){
-            info.resolutions.push_back(QString::number(item.toInt()));
-            info.need_pay.push_back(item.toInt() > 64);
-        }
-        for(auto item : data["accept_description"].toArray()){
-            info.resolutions_name.push_back(item.toString());
-        }
-        emit videoInfoReady(info);
-    });
-}
-
-void LocalProvider::fetchInfo(const SeasonInfo &,int){
-    //We didnot need to get info 
-    VideoInfo info;
-    info.need_pay.push_back(false);
-    info.resolutions.push_back("");
-    info.resolutions_name.push_back("Auto");
-
-    emit videoInfoReady(info);
-}
-void LocalProvider::fetchVideo(const SeasonInfo &s,int n,QStringView){
-    const auto &episode = s.episodes[n];
-
-    auto ret = QFileDialog::getOpenFileUrl(
-        nullptr,
-        "Select Vide for " + episode.title + "(" + (n + 1) + ")"
-    );
-
-    if(ret.isEmpty()){
-        emit error("No file selected");
-        return;
-    }
-    QMediaContent videos(ret);
-    QMediaContent audios;
-    emit videoReady(videos,audios);
 }
 
 PLAYER_NS_END

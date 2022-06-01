@@ -10,6 +10,167 @@
 
 PLAYER_NS_BEGIN
 
+MediaPlayer::MediaPlayer(QObject *parent) : QObject(parent){
+    //Create mediaplayer
+    QMediaPlayer *arr [] = {
+        &player1,
+        &player2
+    };
+
+    for(auto p : arr){
+        //Connect signals
+        connect(p,SIGNAL(error(QMediaPlayer::Error)),this,SLOT(_playerError(QMediaPlayer::Error)));
+        connect(p,SIGNAL(durationChanged(qint64)),this,SLOT(_playerDurationChanged(qint64)));
+        connect(p,SIGNAL(positionChanged(qint64)),this,SLOT(_playerPositionChanged(qint64)));
+        connect(p,SIGNAL(stateChanged(QMediaPlayer::State)),this,SLOT(_playerStateChanged(QMediaPlayer::State)));
+        connect(p,SIGNAL(mediaStatusChanged(QMediaPlayer::MediaStatus)),this,SLOT(_playerMediaStatusChanged(QMediaPlayer::MediaStatus)));
+        connect(p,SIGNAL(bufferStatusChanged(int)),this,SLOT(_playerBufferStatusChanged(int)));
+        //Make mute
+
+        p->setMuted(true);
+    }
+
+}
+MediaPlayer::~MediaPlayer(){
+    //Stop all players
+    player1.stop();
+    player2.stop();
+}
+void MediaPlayer::setVideoOutput(QGraphicsVideoItem *item){
+    video_item = item;
+    //Set video output
+}
+void MediaPlayer::setMedia(VideoResource *res){
+    resource = res;
+
+    QMediaPlayer *arr [] = {
+        &player1,
+        &player2
+    };
+    //Stop all players
+    for(auto p : arr){
+        p->stop();
+        p->setMuted(true);
+        p->setVideoOutput(&empty_item);
+    }
+    currentPlayer = &player1;
+    cur_segment = 0;
+    //Set media
+    player1.setMedia(resource->videos[0]);
+    player1.setVideoOutput(video_item);
+    player1.setMuted(false);
+
+    if(!resource->single_video){
+        //Begin caching
+        player2.setMedia(resource->videos[1]);
+        player2.play();
+    }
+}
+void MediaPlayer::play(){
+    if(currentPlayer->state() == QMediaPlayer::PlayingState){
+        return;
+    }
+    currentPlayer->play();
+}
+
+void MediaPlayer::_playerError(QMediaPlayer::Error e){
+    //Emit error
+    emit error(e);
+}
+void MediaPlayer::_playerDurationChanged(qint64 duration){
+    //Emit duration changed
+    if(resource->single_video){
+        emit durationChanged(duration);
+    }
+    else{
+        //Means this video is ready to play
+        if(sender() == currentPlayer){
+            emit durationChanged(resource->duration);
+        }
+        else if(sender() == _nextPlayer() && duration != 0){
+            //Cached done,pause
+            mplayerDebug() << _nameOfPlayer(sender()) << "Cached done,pause";
+            
+            _nextPlayer()->pause();
+            _nextPlayer()->setPosition(0);
+        }
+    }
+    // emit durationChanged(duration);
+}
+void MediaPlayer::_playerPositionChanged(qint64 position){
+    //Emit position changed
+    if(resource->single_video){
+        //Just forward
+        emit positionChanged(position);
+        return;
+    }
+    if(sender() == currentPlayer){
+        emit positionChanged(resource->segments[cur_segment].start + position);
+    }
+}
+void MediaPlayer::_playerStateChanged(QMediaPlayer::State state){
+    //Emit state changed
+    // emit stateChanged(state);
+    if(resource->single_video){
+        //Just forward
+        emit stateChanged(state);
+        return;        
+    }
+}
+void MediaPlayer::_playerMediaStatusChanged(QMediaPlayer::MediaStatus status){
+    //Emit media status changed
+    // emit mediaStatusChanged(status);
+    mplayerDebug() << _nameOfPlayer(sender()) <<"Media status changed" << status;
+    if(resource->single_video){
+        return;
+    }
+    if(status == QMediaPlayer::EndOfMedia && sender() == currentPlayer){
+        //Switch to next segment
+        mplayerDebug() << _nameOfPlayer(sender()) << "Switch to next segment";
+        if(cur_segment < resource->segments.size() - 1){
+            cur_segment++;
+
+            mplayerDebug() << "From " << _currentPlayerName() << " to " << _nextPlayerName();
+
+            currentPlayer->setMuted(true);
+            currentPlayer->setVideoOutput(&empty_item);
+            currentPlayer->stop();
+            currentPlayer = _nextPlayer();
+
+            //Switch to next segment
+            currentPlayer->setVideoOutput(video_item);
+            currentPlayer->setMuted(false);
+            currentPlayer->play();
+
+            //Let next player to cache if needed
+            if(cur_segment < resource->segments.size() - 1){
+                _nextPlayer()->setMedia(resource->videos[cur_segment + 1]);
+                _nextPlayer()->play();
+            }
+        
+        }
+        else{
+            //Stop
+            currentPlayer->stop();
+        }
+    }
+}
+void MediaPlayer::_playerBufferStatusChanged(int percent){
+    //Emit buffer status changed
+    // emit bufferStatusChanged(percent);
+    // mplayerDebug() << "Buffer status changed" << percent;
+}
+
+qint64 MediaPlayer::position() const {
+    if(resource->single_video){
+        return currentPlayer->position();
+    }
+    else{
+        return resource->segments[cur_segment].start + currentPlayer->position();
+    }
+}
+
+
 Player::Player(QWidget *parent) : QGraphicsView(parent){
     //Configure
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -33,9 +194,9 @@ Player::Player(QWidget *parent) : QGraphicsView(parent){
 
     //--Connect signals and slots
     connect(&player,SIGNAL(error(QMediaPlayer::Error)),this,SLOT(forwardError(QMediaPlayer::Error)));
-    connect(&player,&QMediaPlayer::durationChanged,this,&Player::durationChanged);
-    connect(&player,&QMediaPlayer::positionChanged,this,&Player::positionChanged);
-    connect(&player,&QMediaPlayer::stateChanged,this,&Player::stateChanged);
+    connect(&player,&MediaPlayer::durationChanged,this,&Player::durationChanged);
+    connect(&player,&MediaPlayer::positionChanged,this,&Player::positionChanged);
+    connect(&player,&MediaPlayer::stateChanged,this,&Player::stateChanged);
     connect(vitem,&QGraphicsVideoItem::nativeSizeChanged,this,&Player::nativeSizeChanged);
 
 }
@@ -44,19 +205,21 @@ Player::~Player(){
 }
 
 void Player::durationChanged(qint64 duration){
-    qDebug() << "Got " << duration << "ms";
+    playerDebug() << "durationChanged " << duration << "ms";
+    //Ready to play danmaku
+    video_ready = true; 
     video_duration = duration;
 
     //Try to play danmaku
     danmakuPlay();
 }
 void Player::positionChanged(qint64 pos){
-    qDebug() << "Got " << pos << "ms";
+    playerDebug() << "positionChanged " << pos << "ms";
     if(!danmaku_started){
         return;
     }
     if(danmaku_prev_time < pos){
-        qDebug() << "Danmaku Seek To" << pos;
+        playerDebug() << "Danmaku Seek To" << pos;
         danmakuSeek(pos);
     }
 }
@@ -67,7 +230,9 @@ void Player::stateChanged(QMediaPlayer::State s){
     switch(s){
         case QMediaPlayer::StoppedState:
             //Stoped state,stop danmaku
+            playerDebug() << "Stoped State";
             danmakuClear();
+            video_ready = false;
             break;
         case QMediaPlayer::PausedState:{
             //Kill timer
@@ -117,15 +282,18 @@ void Player::fit(){
     // danmaku_group->setSize(size);
 }
 void Player::nativeSizeChanged(const QSizeF &size){
-    qDebug() << "Got " << size;
+    playerDebug() << "Got " << size;
     native_size = size;
     fit();
 }
-void Player::play(const QMediaContent &video,const QMediaContent &audio){
+void Player::play(const VideoResource &res){
     danmakuClear();//< Stop danmaku / clear danmaku list
-    video_duration = -1;//< Means not ready
-    
-    player.setMedia(video);
+    video_ready = false;//< Means not ready
+
+    // playlist.clear();
+    // playlist.addMedia(res.videos);
+    video_res = res;
+    player.setMedia(&video_res);
     player.play();
 }
 void Player::setDanmaku(const QString &str){
@@ -173,7 +341,11 @@ void Player::setDanmaku(const QString &str){
 
         danmaku_list.push_back(danmaku);
 
-        // qDebug() << list << danmaku.text;
+        // playerDebug() << list << danmaku.text;
+    }
+    if(nodes.size() == 0){
+        playerDebug() << "No danmaku";
+        playerDebug() << str;
     }
     //Sort danmaku by position
     std::sort(danmaku_list.begin(),danmaku_list.end(),[](const Danmaku &a,const Danmaku &b){
@@ -199,11 +371,12 @@ void Player::danmakuPause(){
 
 }
 void Player::danmakuPlay(){
-    if(danmaku_list.empty() || danmaku_started || video_duration == -1){
-        qDebug() << "Try to play danmaku, but not ready";
+    if(danmaku_list.empty() || danmaku_started || (!video_ready)){
+        playerDebug() << "Try to play danmaku, but not ready";
+        playerDebug() << danmaku_list.empty() << danmaku_started << video_ready;
         return;
     }
-    qDebug() << "Start playing danmaku";
+    playerDebug() << "Start playing danmaku";
     //ready
     danmaku_started = true;
     danmaku_paused = false;
@@ -217,7 +390,7 @@ void Player::danmakuPlay(){
     );
     if(danmaku_timer == 0){
         //Fail to start timer
-        qDebug() << "Fail to start danmaku timer";
+        playerDebug() << "Fail to start danmaku timer";
     }
 }
 void Player::danmakuSeek(qint64 _pos){
@@ -231,10 +404,10 @@ void Player::danmakuSeek(qint64 _pos){
         ++danmaku_iter;
     }
     if(danmaku_iter != danmaku_list.cend()){
-        qDebug() << "Seek to " << danmaku_iter->position << "Text:" << danmaku_iter->text;
+        playerDebug() << "Seek to " << danmaku_iter->position << "Text:" << danmaku_iter->text;
     }
     else{
-        qDebug() << "Seek to end";
+        playerDebug() << "Seek to end";
     }
 }
 
@@ -305,40 +478,42 @@ void Player::timerEvent(QTimerEvent *event){
 
                 if(danmaku_group->contains(QPointF(x,y))){
                     //
-                    qDebug() << "Collision";
+                    // playerDebug() << "Regular Collision";
                     x += dan->boundingRect().width();
                 }
                 break;
             }
             case Danmaku::Bottom:{
-                qDebug() << "Bottom danmaku";
+                playerDebug() << "Bottom danmaku";
                 x = s.width() / 2.0 - dan_size.width() / 2.0;
                 y = s.height() - dan_size.height();
                 //Find a position 
                 while(danmaku_group->contains(QPointF(x,y))){
+                    playerDebug() << "Bottom Collision";
                     y -= dan_size.height();
                 }
                 break;
             }
             case Danmaku::Top:{
-                qDebug() << "Top danmaku";
+                playerDebug() << "Top danmaku";
                 x = s.width() / 2.0 - dan_size.width() / 2.0;
                 y = 0;
 
                 //Find a position 
                 while(danmaku_group->contains(QPointF(x,y))){
+                    playerDebug() << "Top Collision";
                     y += dan_size.height();
                 }
                 break;
             }
             case Danmaku::Reserve:{
-                qDebug() << "Reserve danmaku";
+                playerDebug() << "Reserve danmaku";
                 x = -dan_size.width();
                 y = rand() % qint32(s.height() - dan_size.height());
                 break;
             }
             default:{
-                qDebug() << "FIXME : Unsupported danmaku type";
+                playerDebug() << "FIXME : Unsupported danmaku type";
                 x = -dan_size.width();
                 y = -1;
                 break;

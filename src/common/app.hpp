@@ -8,9 +8,8 @@
 #include <QStatusBar>
 #include <QUrl>
 
+#include <QtMultimedia/QMediaContent>
 #include <QtMultimedia/QMediaPlayer>
-#include <QtMultimedia/QMediaPlaylist>
-#include <QtMultimediaWidgets/QVideoWidget>
 
 #include "ui_broswer.h"
 #include "defs.hpp"
@@ -46,6 +45,22 @@ class VideoInfo {
         QList<bool> need_pay;//< Need VIP or extra condition to play in this resolution
 };
 
+class VideoResource {
+    public:
+        struct Segment {
+            qint64 start;//< Start time of it
+            qint64 duration;//< The duration of the segment
+        };
+        
+        QList<QMediaContent> videos;
+        QList<QMediaContent> audios;
+
+        QList<Segment> segments;//< The Segment of the video
+
+        qint64 duration;//< The whole duration of the video in seconds
+        bool single_video;//< If the video is a single video,duration is not needed
+};
+
 /**
  * @brief For Get Video URL from Bilibili
  * 
@@ -53,7 +68,7 @@ class VideoInfo {
 class VideoProvider : public QObject {
     Q_OBJECT
     signals:
-        void videoReady(const QMediaContent &video,const QMediaContent &audio);
+        void videoReady(const VideoResource &res);
         void videoInfoReady(const VideoInfo &info);
         void error(const QString &msg);
     public:
@@ -99,19 +114,6 @@ class BilibiliProvider : public VideoProvider {
         void fetchVideo(const SeasonInfo &season,int idx,QStringView resolution) override;
         void fetchInfo(const SeasonInfo &season,int idx) override;
 };
-/**
- * @brief Provider from Sukura anime
- * 
- */
-class SukuraProvider : public VideoProvider {
-    public:
-        void fetchVideo(const SeasonInfo &season,int idx,QStringView resolution) override;
-        void fetchInfo(const SeasonInfo &season,int idx) override;
-    private:
-        QString search_url = "https://www.yhdmp.cc/s_all?ex=1&kw=";
-        QWebEngineView *view = nullptr;//< Maybe we use WebEngine to parse the javascript to get the video URL
-};
-
 /**
  * @brief Provider from local file
  * 
@@ -198,8 +200,9 @@ class VideoBroswer : public QMainWindow {
     private slots:
         void playerError(QMediaPlayer::Error);
         void listItemClicked(QListWidgetItem *item);
+        void danmakuReceived(QNetworkReply *reply);
     private:
-        void videoReady(const QMediaContent &video,const QMediaContent &audio);
+        void videoReady(const VideoResource &res);
         void videoInfoReady(const VideoInfo &info);
         void videoError(const QString &msg);
 
@@ -209,6 +212,7 @@ class VideoBroswer : public QMainWindow {
         void keyPressEvent(QKeyEvent *event) override;
 
         SeasonInfo season;
+        QMenuBar *menu_bar;
         QStatusBar *status_bar;
         Player *video_widget;
         QNetworkAccessManager *manager;

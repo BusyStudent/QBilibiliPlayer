@@ -1,5 +1,9 @@
 add_rules("mode.debug", "mode.release")
 
+-- Qt XPath is too bad,so we use libxml2 :(
+add_requires("libxml2")
+add_packages("libxml2")
+
 target("QBilibiliPlayer")
     add_rules("qt.widgetapp")
 
@@ -9,9 +13,8 @@ target("QBilibiliPlayer")
     add_frameworks("QtWebEngine")
     add_frameworks("QtWebEngineWidgets")
 
-    --SukuraProvider
+    --SukuraProvider / Angle Provider
     add_frameworks("QtXml")
-    -- add_frameworks("QtXmlPatterns")
 
     add_files("src/ui/*.ui")
     add_files("src/common/*.hpp");
