@@ -672,12 +672,11 @@ void YsjdmProvider::matchVideoPages(const QString &str){
             }
             dialog.setComboBoxItems(items);
             dialog.setWindowTitle("Select Video");
-            dialog.exec();
-            auto index = dialog.textValue();
-            if(index.isEmpty()){
-                emit error("No video selected");
+            if(dialog.exec() == QDialog::Rejected){
+                emit error("User cancel");
                 return;
             }
+            auto index = dialog.textValue();
             //Find the url by it
             for(auto pair : results){
                 if(pair.first == index){
@@ -769,7 +768,10 @@ void YsjdmProvider::fetchInfo(const SeasonInfo &season,int idx){
         return;
     }
     //Begin match
-    matchVideoPages(season.season_title);
+    QString title = season.season_title;
+    title = title.split(" ")[0];
+
+    matchVideoPages(title);
 }
 void YsjdmProvider::fetchVideo(const SeasonInfo &season,int n,QStringView){
     if(!matched){

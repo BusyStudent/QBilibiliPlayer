@@ -16,6 +16,8 @@ target("QBilibiliPlayer")
     --SukuraProvider / Angle Provider
     add_frameworks("QtXml")
 
+    add_files("src/resource.qrc")
+
     add_files("src/ui/*.ui")
     add_files("src/common/*.hpp");
     add_files("src/*.cpp");

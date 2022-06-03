@@ -226,7 +226,29 @@ VideoBroswer::VideoBroswer(App *w,const SeasonInfo &info):QMainWindow(w),season(
 
     //--Add player
     video_widget = new Player(this);
-    ui->playerBox->addWidget(video_widget);
+    ui->playerBox->insertWidget(0,video_widget);
+    //--Connect to the signal
+    connect(video_widget->mediaPlayer(),&MediaPlayer::mediaStatusChanged,this,&VideoBroswer::mediaStatusChanged);
+    connect(video_widget->mediaPlayer(),&MediaPlayer::bufferStatusChanged,this,&VideoBroswer::bufferStatusChanged);
+    connect(video_widget->mediaPlayer(),&MediaPlayer::positionChanged,this,&VideoBroswer::positionChanged);
+    connect(video_widget->mediaPlayer(),&MediaPlayer::durationChanged,this,&VideoBroswer::durationChanged);
+    //--Connect control buttons
+    connect(ui->fullscreenButton,&QPushButton::clicked,this,&VideoBroswer::doFullScreen);
+    connect(ui->playButton,&QPushButton::clicked,this,&VideoBroswer::doPlayButton);
+    connect(ui->volumeButton,&QPushButton::clicked,this,&VideoBroswer::doVolumeButton);
+    //--set it
+    connect(ui->progressSilder,&QSlider::sliderPressed,[this](){
+        doPause();
+    });
+    connect(ui->progressSilder,&QSlider::sliderMoved,[this](int position){
+        ui->timeLabel->setText(QTime(0,0,0).addMSecs(position).toString("hh:mm:ss"));
+        ui->progressSilder->setValue(position);
+    });
+    connect(ui->progressSilder,&QSlider::sliderReleased,[this](){
+        video_widget->setPosition(ui->progressSilder->value());
+        //Back to playing
+        doPause();
+    });
 
     //status bar
     status_bar = new QStatusBar(this);
@@ -268,27 +290,28 @@ VideoBroswer::VideoBroswer(App *w,const SeasonInfo &info):QMainWindow(w),season(
     });
 }
 
-VideoBroswer::~VideoBroswer(){
-    qDebug() << "Video Broswer Destroyed";
+VideoBroswer::~VideoBroswer(){    
+    vbrowserDebug() << "Video Broswer Destroyed";
 
     for(auto p : providers){
         delete p;
     }
 
     delete ui;
+    ui = nullptr;
 }
 
 void VideoBroswer::playerError(QMediaPlayer::Error error){
     if(error){
 
     }
-    qDebug() << "Player Error:" << error;
+    vbrowserDebug() << "Player Error:" << error;
 }
 void VideoBroswer::listItemClicked(QListWidgetItem *item){
-    qDebug() << "List Item Clicked:" << item->data(Qt::UserRole).toInt();
+    vbrowserDebug() << "List Item Clicked:" << item->data(Qt::UserRole).toInt();
 
     if(!ui->resolutionBox->currentData().isValid()){
-        qDebug() << "No resolution selected";
+        vbrowserDebug() << "No resolution selected";
         return;
     }
 
@@ -300,14 +323,16 @@ void VideoBroswer::listItemClicked(QListWidgetItem *item){
     provider->fetchVideo(season,index,ui->resolutionBox->currentData().toString());
 }
 void VideoBroswer::videoReady(const VideoResource &res){
-    qDebug() << "Video Ready";
+    vbrowserDebug() << "Video Ready";
     video_widget->play(res);
+    //Configure ui
     status_bar->showMessage("VideoReady playing...");
+    ui->playButton->setIcon(QIcon(":/icons/pause.png"));
     //Begin fetch danmaku
     fetchDanmaku(ui->listWidget->currentItem()->data(Qt::UserRole).toInt());
 }
 void VideoBroswer::videoInfoReady(const VideoInfo &info){
-    qDebug() << "Video Info Ready";
+    vbrowserDebug() << "Video Info Ready";
     //Add to the combo box
     for(int n = 0;n < info.resolutions.size();n++){
         ui->resolutionBox->addItem(info.resolutions_name[n],QVariant::fromValue(info.resolutions[n]));
@@ -323,7 +348,7 @@ void VideoBroswer::videoInfoReady(const VideoInfo &info){
     status_bar->showMessage("VideoInfoReady");
 }
 void VideoBroswer::videoError(const QString &error){
-    qDebug() << "Video Error:" << error;
+    vbrowserDebug() << "Video Error:" << error;
     QMessageBox msg;
     
     status_bar->showMessage("Video Error:" + error);
@@ -335,7 +360,7 @@ void VideoBroswer::videoError(const QString &error){
 
 }
 void VideoBroswer::fetchDanmaku(int n){
-    qDebug() << "Fetch Danmaku for video:" << n;
+    vbrowserDebug() << "Fetch Danmaku for video:" << n;
     int cid = season.episodes[n].cid;
     //Get danmaku from bilibili
     QUrl req(QString("https://comment.bilibili.com/%1.xml").arg(cid));
@@ -348,31 +373,31 @@ void VideoBroswer::fetchDanmaku(int n){
     connect(reply,&QNetworkReply::finished,[reply,this](){
         danmakuReceived(reply);
     });
-    qDebug() << req;
+    vbrowserDebug() << req;
 }
 void VideoBroswer::danmakuReceived(QNetworkReply *reply){
     reply->deleteLater();        
     if(reply->error()){
-        qDebug() << "Fetch Danmaku Error:" << reply->errorString();
+        vbrowserDebug() << "Fetch Danmaku Error:" << reply->errorString();
         status_bar->showMessage("Fetch Danmaku Error:" + reply->errorString());
         return;
     }
     if(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 302){
         //Redirect
-        qDebug() << "Redirect";
+        vbrowserDebug() << "Redirect";
         QUrl redirect = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
         QNetworkRequest request(redirect);
         request.setRawHeader("User-Agent",PLAYER_USERAGENT);
         request.setRawHeader("Referer",PLAYER_BILIREFERER);
         auto reply = manager->get(request);
-        qDebug() << redirect;
+        vbrowserDebug() << redirect;
         connect(reply,&QNetworkReply::finished,this,[reply,this](){
             danmakuReceived(reply);
         });
         return;
     }
 
-    qDebug() << "Fetch Danmaku Success";
+    vbrowserDebug() << "Fetch Danmaku Success";
     status_bar->showMessage("Fetch Danmaku Success");
     QString ret = reply->readAll();
     //Process it
@@ -381,28 +406,126 @@ void VideoBroswer::danmakuReceived(QNetworkReply *reply){
 void VideoBroswer::playDanmaku(const QString &d){
     video_widget->setDanmaku(d);
 }
+void VideoBroswer::bufferStatusChanged(int percent){
+    status_bar->showMessage(QString("Buffering %1%").arg(percent));
+}
+void VideoBroswer::mediaStatusChanged(QMediaPlayer::MediaStatus status){
+    if(status == QMediaPlayer::BufferedMedia){
+        vbrowserDebug() << "Buffered";
+        status_bar->showMessage("Buffered");
+    }
+    else if(status == QMediaPlayer::StalledMedia){
+        vbrowserDebug() << "Begin buffering";
+    }
+    else if(status == QMediaPlayer::EndOfMedia){
+        vbrowserDebug() << "EndofMedia";
+        ui->progressSilder->setRange(0,0);
+        ui->durationLabel->setText("00:00:00");
+        ui->timeLabel->setText("00:00:00");
+        ui->playButton->setIcon(QIcon(":/icons/play.png"));
+    }
+}
+void VideoBroswer::durationChanged(qint64 duration){
+    if(ui != nullptr){
+        ui->progressSilder->setRange(0,duration);
+        ui->durationLabel->setText(QTime(0,0,0).addMSecs(duration).toString("hh:mm:ss"));
+    }
+}
+void VideoBroswer::positionChanged(qint64 position){
+    if(ui != nullptr){
+        ui->progressSilder->setValue(position);
+        ui->timeLabel->setText(QTime(0,0,0).addMSecs(position).toString("hh:mm:ss"));
+    }
+}
 
 void VideoBroswer::closeEvent(QCloseEvent *event){
     deleteLater();
 }
 void VideoBroswer::keyPressEvent(QKeyEvent *event){
     if(event->key() == Qt::Key_F11){
-        //Check is already fullscreen
-        bool visible = isFullScreen();
-        if(isFullScreen()){
-            showNormal();
-        }
-        else{
-            showFullScreen();
-        }
-        ui->listWidget->setVisible(visible);
-        ui->label->setVisible(visible);
-        ui->providerBox->setVisible(visible);
-        ui->providerLabel->setVisible(visible);
-        ui->resolutionBox->setVisible(visible);
-        ui->resolutionLabel->setVisible(visible);
-        status_bar->setVisible(visible);
-        menu_bar->setVisible(visible);
+        doFullScreen();
+    }
+    else if(event->key() == Qt::Key_Space){
+        doPause();
+    }
+    else if(event->key() == Qt::Key_Right){
+        video_widget->setPosition(video_widget->position() + 5000);
+    }
+    else if(event->key() == Qt::Key_Left){
+        video_widget->setPosition(video_widget->position() - 5000);
+    }
+}
+void VideoBroswer::doPause(){
+    if(video_widget->mediaPlayer()->isPaused()){
+        qDebug() << "Play the video";
+        ui->playButton->setIcon(QIcon(":/icons/pause.png"));
+        video_widget->resume();
+    }
+    else{
+        qDebug() << "Pause the video";
+        ui->playButton->setIcon(QIcon(":/icons/play.png"));
+        video_widget->pause();
+    }
+}
+void VideoBroswer::doFullScreen(){
+    //Check is already fullscreen
+    bool visible = isFullScreen();
+    if(isFullScreen()){
+        ui->fullscreenButton->setIcon(QIcon(":/icons/full.png"));
+        showNormal();
+    }
+    else{
+        ui->fullscreenButton->setIcon(QIcon(":/icons/min.png"));
+        showFullScreen();
+    }
+    ui->listWidget->setVisible(visible);
+    ui->label->setVisible(visible);
+    ui->providerBox->setVisible(visible);
+    ui->providerLabel->setVisible(visible);
+    ui->resolutionBox->setVisible(visible);
+    ui->resolutionLabel->setVisible(visible);
+    status_bar->setVisible(visible);
+    menu_bar->setVisible(visible);
+}
+void VideoBroswer::doPlayButton(){
+    if(!video_widget->mediaPlayer()->hasMedia()){
+        //No media nothing to play
+        return;
+    }
+    doPause();
+}
+void VideoBroswer::doVolumeButton(){
+    struct Data : QObjectUserData {
+        QSlider *slider;
+    };
+    Data *data = (Data*)ui->volumeButton->userData(Qt::UserRole);
+    if(data == nullptr){
+        //Create one
+        //TODO volume dialog
+        auto slider = new QSlider(this);
+        //Get current volume
+        slider->setRange(0,100);
+        slider->setValue(video_widget->mediaPlayer()->volume());
+        //Let it on the upside of volume button
+        auto pos = ui->volumeButton->pos();
+        pos.setY(pos.y() - slider->height());
+        slider->move(pos);
+        slider->show();
+
+        data = new Data;
+        data->slider = slider;
+
+        ui->volumeButton->setUserData(Qt::UserRole,data);
+
+        //Connect signals
+        connect(video_widget->mediaPlayer(),&MediaPlayer::volumeChanged,slider,&QSlider::setValue);
+        connect(slider,&QSlider::valueChanged,video_widget->mediaPlayer(),&MediaPlayer::setVolume);
+    }
+    else{
+        //Delete it
+        data->slider->deleteLater();
+        ui->volumeButton->setUserData(Qt::UserRole,nullptr);
+        delete data;
     }
 }
 

@@ -14,8 +14,6 @@
 //We cached 2 resource at once time
 #define PLAYER_CACHES_SIZE 2
 
-
-
 PLAYER_NS_BEGIN
 
 class Danmaku {
@@ -80,6 +78,11 @@ class MediaPlayer : public QObject {
         void durationChanged(qint64 duration);
         void positionChanged(qint64 position);
         void stateChanged(QMediaPlayer::State state);
+        void mediaStatusChanged(QMediaPlayer::MediaStatus status);
+        void bufferStatusChanged(int percentFilled);
+        void volumeChanged(int volume);
+
+        void nativeSizeChanged(const QSizeF &size);
     private slots:
         //Map cached resource to the player
         void _playerDurationChanged(qint64 duration);
@@ -88,6 +91,8 @@ class MediaPlayer : public QObject {
         void _playerError(QMediaPlayer::Error error);
         void _playerMediaStatusChanged(QMediaPlayer::MediaStatus status);
         void _playerBufferStatusChanged(int percent);
+        void _playerVolumeChanged(int volume);
+        void _itemNativeSizeChanged(const QSizeF &size);
     private:
         QMediaPlayer *_currentPlayer(){
             return currentPlayer;
@@ -98,6 +103,19 @@ class MediaPlayer : public QObject {
             else
                 return &player1;
         }
+        QGraphicsVideoItem *_currentVideoItem(){
+            if(&player1 == _currentPlayer())
+                return player1_item;
+            else
+                return player2_item;
+        }
+        QGraphicsVideoItem *_nextVideoItem(){
+            if(&player1 == _currentPlayer())
+                return player2_item;
+            else
+                return player1_item;
+        }
+
         void _setCurrentPlayer(QMediaPlayer *player);
         const char *_currentPlayerName(){
             if(&player1 == _currentPlayer())
@@ -121,22 +139,43 @@ class MediaPlayer : public QObject {
         MediaPlayer(QObject *parent = nullptr);
         ~MediaPlayer();
 
-        void setVideoOutput(QGraphicsVideoItem *item);
-        void setVideoOutput(QGraphicsView *view);
+        void setVideoOutput(QGraphicsScene *scene);
+        void setOutputRect(qreal x,qreal y,qreal w,qreal h);
+
         void setMedia(VideoResource *res);
 
         void pause();
         void play();
+        void setPosition(qint64 pos);
+
         qint64 position() const;
+        qint64 duration() const;
+        qint64 volume() const;
+        
+        QSizeF nativeSize() {
+            return _currentVideoItem()->nativeSize();
+        }
+
+        bool isPaused() const {
+            return currentPlayer->state() == QMediaPlayer::PausedState;
+        }
+        bool hasMedia() const {
+            return resource != nullptr;
+        }
+        void setVolume(int vol) {
+            player1.setVolume(vol);
+            player2.setVolume(vol);
+        }
     private:
         //Switch between 2 players
         QMediaPlayer player1;
         QMediaPlayer player2;
+        QGraphicsVideoItem *player1_item;
+        QGraphicsVideoItem *player2_item;
 
         QMediaPlayer *currentPlayer = &player1;
 
         VideoResource *resource;
-        QGraphicsVideoItem *video_item;
         QGraphicsVideoItem  empty_item;
         size_t cur_segment = 0;
 };
@@ -156,9 +195,34 @@ class Player : public QGraphicsView {
          * 
          */
         void play(const VideoResource &res);
-        void pause();
-        void resume();
+        void pause() {
+            mediaPlayer()->pause();
+        }
+        void resume() {
+            mediaPlayer()->play();
+            danmakuPlay();
+        }
         void stop();
+        //position in ms
+        qint64 position() {
+            return mediaPlayer()->position();
+        }
+        void setPosition(qint64 pos) {
+            danmakuSeek(pos);
+            mediaPlayer()->setPosition(pos);
+            qDeleteAll(danmaku_group->childItems());
+        }
+        //Danmaku variables
+        void setDanmakuVisible(bool visible) {
+            danmaku_group->setVisible(visible);
+        }
+        bool isDanmakuVisible() {
+            return danmaku_group->isVisible();
+        }
+
+        MediaPlayer *mediaPlayer() {
+            return &player;
+        }
     private slots:
         void forwardError(QMediaPlayer::Error error);
         // void paused();
@@ -187,7 +251,6 @@ class Player : public QGraphicsView {
         QSizeF native_size = QSizeF(-1,-1);
 
         QGraphicsScene scene;
-        QGraphicsVideoItem *vitem;
         QGraphicsItemGroup *danmaku_group;//< Danmaku group alwasy is screen size
         QGraphicsItemGroup *control_group;//< Control group alwasy is screen size
 
@@ -209,7 +272,6 @@ class Player : public QGraphicsView {
         qreal danmaku_prev_time;//< Last position danmaku update
         qint64 danmaku_fps = 60;//< TODO : Detect FPS
         bool danmaku_started = false;
-        bool danmaku_paused = false;
 
         //Outline
         QPen outpen = QPen(Qt::black,0.5,Qt::SolidLine);

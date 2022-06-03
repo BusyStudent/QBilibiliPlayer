@@ -35,6 +35,8 @@
         "qnetworkreply": "cpp",
         "qxmlquery": "cpp",
         "qxmlstreamreader": "cpp",
-        "qwebenginepage": "cpp"
+        "qwebenginepage": "cpp",
+        "new": "cpp",
+        "sstream": "cpp"
     }
 }

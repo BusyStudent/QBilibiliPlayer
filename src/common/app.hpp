@@ -201,6 +201,12 @@ class VideoBroswer : public QMainWindow {
         void playerError(QMediaPlayer::Error);
         void listItemClicked(QListWidgetItem *item);
         void danmakuReceived(QNetworkReply *reply);
+        //From MediaPlayer
+        void mediaStatusChanged(QMediaPlayer::MediaStatus);
+        void bufferStatusChanged(int);
+        //For VideoPlayer
+        void durationChanged(qint64);
+        void positionChanged(qint64);
     private:
         void videoReady(const VideoResource &res);
         void videoInfoReady(const VideoInfo &info);
@@ -210,6 +216,11 @@ class VideoBroswer : public QMainWindow {
         void userEpisodeInfoReady(const SeasonInfo &);
         void closeEvent(QCloseEvent *event) override;
         void keyPressEvent(QKeyEvent *event) override;
+
+        void doFullScreen();
+        void doPlayButton();//< Play or pause the video
+        void doPause();//< Try to pause or resume the video
+        void doVolumeButton();//< Open the volume control dialog
 
         SeasonInfo season;
         QMenuBar *menu_bar;
